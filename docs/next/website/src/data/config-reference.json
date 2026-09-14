@@ -1392,6 +1392,17 @@
           ]
         },
         {
+          "key": "ui.sound.agents.codebuddy",
+          "type": "enum",
+          "default": "\"default\"",
+          "description": "Sound override for detected CodeBuddy Code agents.",
+          "values": [
+            "default",
+            "on",
+            "off"
+          ]
+        },
+        {
           "key": "ui.sound.agents.letta",
           "type": "enum",
           "default": "\"default\"",

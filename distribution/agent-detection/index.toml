@@ -85,5 +85,9 @@ id = "qwen"
 path = "qwen.toml"
 
 [[agents]]
+id = "codebuddy"
+path = "codebuddy.toml"
+
+[[agents]]
 id = "copilot"
 path = "github-copilot.toml"

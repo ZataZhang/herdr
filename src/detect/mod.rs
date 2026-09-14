@@ -62,13 +62,14 @@ pub enum Agent {
     Kilo,
     Qodercli,
     Qwen,
+    CodeBuddy,
     Letta,
     Maki,
     Muse,
 }
 
 impl Agent {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -90,12 +91,13 @@ impl Agent {
         Self::Kilo,
         Self::Qodercli,
         Self::Qwen,
+        Self::CodeBuddy,
         Self::Letta,
         Self::Maki,
         Self::Muse,
     ];
 
-    pub const SCREEN_MANIFEST_AGENTS: [Self; 22] = [
+    pub const SCREEN_MANIFEST_AGENTS: [Self; 23] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -115,6 +117,7 @@ impl Agent {
         Self::Kilo,
         Self::Qodercli,
         Self::Qwen,
+        Self::CodeBuddy,
         Self::Letta,
         Self::Maki,
         Self::Muse,
@@ -144,6 +147,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
         Agent::Qwen => "qwen",
+        Agent::CodeBuddy => "codebuddy",
         Agent::Letta => "letta",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
@@ -179,6 +183,7 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
         Agent::Qwen => "qwen",
+        Agent::CodeBuddy => "codebuddy",
         Agent::Letta => "letta",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
@@ -219,6 +224,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
         "qwen" | "qwen-code" | "qwen code" => Some(Agent::Qwen),
+        "codebuddy" | "codebuddy-code" | "codebuddy code" | "cbc" => Some(Agent::CodeBuddy),
         "letta" | "letta-code" | "letta code" => Some(Agent::Letta),
         "maki" => Some(Agent::Maki),
         "muse" | "muse-code" | "muse-cli" => Some(Agent::Muse),
@@ -1021,6 +1027,10 @@ mod tests {
         assert_eq!(identify_agent("kilo-code"), Some(Agent::Kilo));
         assert_eq!(identify_agent("qwen"), Some(Agent::Qwen));
         assert_eq!(identify_agent("Qwen Code"), Some(Agent::Qwen));
+        assert_eq!(identify_agent("codebuddy"), Some(Agent::CodeBuddy));
+        assert_eq!(identify_agent("codebuddy-code"), Some(Agent::CodeBuddy));
+        assert_eq!(identify_agent("CodeBuddy Code"), Some(Agent::CodeBuddy));
+        assert_eq!(identify_agent("cbc"), Some(Agent::CodeBuddy));
         assert_eq!(identify_agent("letta"), Some(Agent::Letta));
         assert_eq!(identify_agent("Letta Code"), Some(Agent::Letta));
         assert_eq!(identify_agent("maki"), Some(Agent::Maki));
@@ -1107,6 +1117,7 @@ mod tests {
             (Agent::Kilo, "kilo"),
             (Agent::Qodercli, "qodercli"),
             (Agent::Qwen, "qwen"),
+            (Agent::CodeBuddy, "codebuddy"),
             (Agent::Letta, "letta"),
             (Agent::Maki, "maki"),
             (Agent::Muse, "muse"),
@@ -1204,6 +1215,31 @@ mod tests {
             assert_eq!(
                 identify_agent_in_job(&job),
                 Some((Agent::Qwen, "qwen".to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn identify_agent_in_job_detects_node_wrapped_codebuddy() {
+        // CodeBuddy 经 npm bin shim 以 node 启动：argv0=node，argv[1]=.../bin/codebuddy
+        for argv in [
+            vec![
+                "node",
+                "/Users/user/.local/state/fnm_multishells/10714_1789354576148/bin/codebuddy",
+            ],
+            vec![
+                "node.exe",
+                r"C:\Users\user\AppData\Roaming\npm\bin\codebuddy",
+            ],
+        ] {
+            let job = crate::platform::ForegroundJob {
+                process_group_id: 123,
+                processes: vec![foreground_process(123, "node", &argv)],
+            };
+
+            assert_eq!(
+                identify_agent_in_job(&job),
+                Some((Agent::CodeBuddy, "codebuddy".to_string()))
             );
         }
     }

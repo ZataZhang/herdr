@@ -1,0 +1,128 @@
+# CodeBuddy Code 屏幕检测清单（herdr 本地覆盖）
+# 基于 herdr 官方 claude.toml 结构，按 CodeBuddy Code 2.150.0 实测 UI 调整：
+#   - 对话框页脚为大写 "Esc to cancel" / "Enter to confirm"（Claude 为小写）
+#   - 输入框提示符为 ">"（Claude 为 "❯"）
+#   - 导航提示为 "↑↓ to navigate" / "Tab/Arrow keys to navigate"
+#   - 工作行形如 "✻ Measuring… (esc to interrupt)"
+#   - OSC 标题：运行中带 braille 旋转符前缀（⠴ ⠙ …），空闲带 "✳ " 前缀
+id = "codebuddy"
+version = "2026.09.14.1"
+min_engine_version = 2
+updated_at = "2026-09-14T00:00:00Z"
+aliases = ["codebuddy-code", "cbc"]
+
+# ---- working ----
+
+[[rules]]
+id = "osc_title_working"
+state = "working"
+priority = 1100
+region = "osc_title"
+visible_working = true
+# 运行中 OSC 标题以 braille 旋转符开头（如 "⠴ 了解 herdr 黄色运行状态提示"）
+regex = ['^[\x{2800}-\x{28FF}] ']
+
+[[rules]]
+id = "live_turn_working"
+state = "working"
+priority = 970
+region = "bottom_non_empty_lines(12)"
+visible_working = true
+# 工作行："✻ Measuring… (esc to interrupt)"，或 ⏸/⏵ 前缀的 interrupt 提示
+any = [
+  { line_regex = ['^\s*[⏸⏵].*esc to interrupt(?:\s|·|$)'] },
+  { line_regex = ['^\s*[\x{002A}\x{00B7}\x{2722}\x{2733}\x{2736}\x{273B}\x{273D}\x{2740}\x{2743}\x{2747}\x{274A}]\s+\S.*…\s*\(esc to interrupt\)\s*$'] },
+]
+
+# ---- 转写查看器（不参与状态判定）----
+
+[[rules]]
+id = "transcript_viewer"
+state = "unknown"
+priority = 1000
+region = "bottom_non_empty_lines(3)"
+skip_state_update = true
+contains = ["Ctrl+O to expand"]
+
+# ---- blocked ----
+
+[[rules]]
+id = "live_blocked_form"
+state = "blocked"
+priority = 980
+region = "after_last_horizontal_rule"
+visible_blocker = true
+# CodeBuddy 对话框页脚："Enter to confirm · Esc to cancel"（大写）
+contains = ["Esc to cancel"]
+any = [
+  { contains = ["Enter to confirm"] },
+  { contains = ["Enter to select"], any = [
+    { contains = ["to navigate"] },
+  ] },
+  { contains = ["enter to select"], any = [
+    { contains = ["to navigate"] },
+  ] },
+]
+
+[[rules]]
+id = "permission_prompt"
+state = "blocked"
+priority = 850
+region = "whole_recent"
+visible_blocker = true
+# 权限审批对话框："Do you want to proceed?" + "1. Yes / 2. Yes, and don't ask again / 3. No"
+contains = ["Do you want to proceed?"]
+all = [
+  { any = [
+    { line_regex = ['(?i)^\s*[>❯]?\s*1\.\s*yes\b'] },
+    { line_regex = ['(?i)^\s*2\.\s*yes\b'] },
+    { line_regex = ['(?i)^\s*3\.\s*no\b'] },
+  ] },
+]
+
+[[rules]]
+id = "generic_blocker_fallback"
+state = "blocked"
+priority = 300
+region = "whole_recent"
+any = [
+  { contains = ["Do you want to"], any = [{ contains = ["Yes"] }, { contains = [">"] }] },
+  { contains = ["Would you like to"], any = [{ contains = ["Yes"] }, { contains = [">"] }] },
+  { contains = ["waiting for permission"] },
+  { contains = ["Esc to cancel", "Enter to confirm"] },
+]
+not = [
+  { regex = ['(?m)^\s*>\s*$'] },
+]
+
+# ---- idle ----
+
+[[rules]]
+id = "live_prompt_box"
+state = "idle"
+priority = 950
+region = "prompt_box_body"
+visible_idle = true
+# CodeBuddy 输入框提示符为 ">"
+line_regex = ['^\s*>']
+not = [
+  { contains = ["Enter to select"] },
+  { contains = ["Esc to cancel"] },
+  { contains = ["to navigate"] },
+]
+
+[[rules]]
+id = "osc_title_idle"
+state = "idle"
+priority = 250
+region = "osc_title"
+visible_idle = true
+# 空闲时 OSC 标题以 "✳ " 开头（如 "✳ Review blog post delete PRD status"）
+regex = ['^\x{2733} ']
+
+[[rules]]
+id = "osc_progress_idle"
+state = "idle"
+priority = 250
+region = "osc_progress"
+regex = ['^4;0']
