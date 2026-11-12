@@ -411,8 +411,7 @@ async fn report_self_reported_agent_shell_return(
     }
 }
 const PROCESS_RECHECK_IDENTIFIED: std::time::Duration = std::time::Duration::from_secs(5);
-const PROCESS_RECHECK_MISSING_FOREGROUND_GROUP: std::time::Duration =
-    std::time::Duration::from_secs(30);
+const PROCESS_RECHECK_UNIDENTIFIED: std::time::Duration = std::time::Duration::from_secs(30);
 const PROCESS_ACQUISITION_WINDOW: std::time::Duration = std::time::Duration::from_secs(8);
 const PROCESS_ACQUISITION_FAST_WINDOW: std::time::Duration = std::time::Duration::from_millis(1500);
 const PROCESS_ACQUISITION_FAST_RECHECK: std::time::Duration = std::time::Duration::from_millis(500);
@@ -741,10 +740,13 @@ fn should_probe_foreground_job(input: ProcessProbeInput) -> bool {
     }
 
     if input.current_agent.is_none() {
+        // Without an identified agent the pane must keep re-probing on a slow
+        // cadence even when the foreground group is stable: a detection reset
+        // (or a missed acquisition) otherwise leaves the probe dormant forever
+        // while the kernel keeps reporting the same shell pgid.
         return !input.has_process_probe
             || foreground_group_changed
-            || (input.foreground_pgid.is_none()
-                && input.elapsed_since_process_check >= PROCESS_RECHECK_MISSING_FOREGROUND_GROUP);
+            || input.elapsed_since_process_check >= PROCESS_RECHECK_UNIDENTIFIED;
     }
 
     foreground_group_changed || input.elapsed_since_process_check >= PROCESS_RECHECK_IDENTIFIED
@@ -964,6 +966,7 @@ fn spawn_basic_detection_task(
         let mut last_screen_scan_detection_content_seq = None;
         let mut agent_startup_grace_until = None;
         let mut pending_idle = PendingIdleConfirmation::default();
+        let mut force_publish = false;
         let mut last_codex_prompt_ready = false;
         let mut last_self_reported_shell_check = None;
         let mut agent_job = AgentJobTracker::default();
@@ -1000,6 +1003,10 @@ fn spawn_basic_detection_task(
                     agent_startup_grace_until = None;
                     pending_idle.clear();
                     agent_job = AgentJobTracker::default();
+                    // The reset wiped the local publish baseline; force the next
+                    // evaluation to publish so app-side state converges instead
+                    // of keeping the last pre-reset state pinned.
+                    force_publish = true;
                 }
             }
 
@@ -1218,6 +1225,7 @@ fn spawn_basic_detection_task(
                     last_visible_signal_refresh,
                     process_exited,
                     agent_changed,
+                    force_publish: std::mem::take(&mut force_publish),
                     now,
                 },
                 &mut pending_idle,
@@ -2889,6 +2897,7 @@ impl PaneRuntime {
                 let mut last_screen_scan_detection_content_seq = None;
                 let mut agent_startup_grace_until = None;
                 let mut pending_idle = PendingIdleConfirmation::default();
+                let mut force_publish = false;
                 let mut last_codex_prompt_ready = false;
                 let mut last_self_reported_shell_check = None;
                 let mut agent_job = AgentJobTracker::default();
@@ -2935,6 +2944,11 @@ impl PaneRuntime {
                             agent_startup_grace_until = None;
                             pending_idle.clear();
                             agent_job = AgentJobTracker::default();
+                            // The reset wiped the local publish baseline; force
+                            // the next evaluation to publish so app-side state
+                            // converges instead of keeping the last pre-reset
+                            // state pinned.
+                            force_publish = true;
                         }
                     }
 
@@ -3226,6 +3240,7 @@ impl PaneRuntime {
                             last_visible_signal_refresh,
                             process_exited,
                             agent_changed,
+                            force_publish: std::mem::take(&mut force_publish),
                             now,
                         },
                         &mut pending_idle,
@@ -6134,9 +6149,13 @@ mod tests {
     }
 
     #[test]
-    fn stable_unidentified_foreground_group_has_no_safety_process_probe() {
-        assert!(!should_probe_foreground_job(ProcessProbeInput {
-            elapsed_since_process_check: PROCESS_RECHECK_MISSING_FOREGROUND_GROUP,
+    fn stable_unidentified_foreground_group_reprobes_periodically() {
+        // A known, stable foreground group must not keep the probe dormant: after
+        // a detection reset the shell pgid never changes, so only this periodic
+        // recheck can redetect an agent or confirm none is running.
+        assert!(!should_probe_foreground_job(process_probe_input()));
+        assert!(should_probe_foreground_job(ProcessProbeInput {
+            elapsed_since_process_check: PROCESS_RECHECK_UNIDENTIFIED,
             ..process_probe_input()
         }));
     }
@@ -6151,7 +6170,7 @@ mod tests {
         assert!(should_probe_foreground_job(ProcessProbeInput {
             foreground_pgid: None,
             last_foreground_pgid: None,
-            elapsed_since_process_check: PROCESS_RECHECK_MISSING_FOREGROUND_GROUP,
+            elapsed_since_process_check: PROCESS_RECHECK_UNIDENTIFIED,
             ..process_probe_input()
         }));
     }

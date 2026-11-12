@@ -224,6 +224,7 @@ pub(super) struct DetectionTransitionInput {
     pub(super) agent_changed: bool,
     pub(super) process_exited: bool,
     pub(super) stable_refresh_due: bool,
+    pub(super) force_publish: bool,
     pub(super) now: std::time::Instant,
 }
 
@@ -231,6 +232,14 @@ pub(super) fn decide_detection_transition(
     input: DetectionTransitionInput,
     pending_idle: &mut PendingIdleConfirmation,
 ) -> DetectionTransitionDecision {
+    // A detection reset wipes the loop-local baseline, so the diff check alone
+    // cannot converge app-side state; the first evaluation afterwards must
+    // publish unconditionally, bypassing the pending-idle hold as well.
+    if input.force_publish {
+        pending_idle.clear();
+        return DetectionTransitionDecision::PublishNext;
+    }
+
     if pending_idle.should_hold_working_to_idle(
         input.previous_publish,
         input.next_publish,
@@ -276,6 +285,7 @@ pub(super) struct ScreenDetectionPublishInput {
     pub(super) screen_detection: AgentDetection,
     pub(super) process_exited: bool,
     pub(super) agent_changed: bool,
+    pub(super) force_publish: bool,
     pub(super) now: std::time::Instant,
 }
 
@@ -315,6 +325,7 @@ pub(super) fn decide_screen_detection_publish(
             agent_changed: input.agent_changed,
             process_exited: input.process_exited,
             stable_refresh_due,
+            force_publish: input.force_publish,
             now: input.now,
         },
         pending_idle,
@@ -481,6 +492,7 @@ mod tests {
             screen_detection,
             process_exited: false,
             agent_changed: false,
+            force_publish: false,
             now,
         }
     }
@@ -634,12 +646,72 @@ mod tests {
                     agent_changed: false,
                     process_exited: false,
                     stable_refresh_due: false,
+                    force_publish: false,
                     now,
                 },
                 &mut pending_idle,
             ),
             DetectionTransitionDecision::PublishNext
         );
+    }
+
+    #[test]
+    fn forced_publish_after_reset_converges_unchanged_state() {
+        let now = std::time::Instant::now();
+        let mut pending_idle = PendingIdleConfirmation::default();
+
+        // After a detection reset the loop-local baseline is wiped, so the next
+        // evaluation matches it exactly; without a forced publish nothing would
+        // ever reach the app and a stale state would stay pinned.
+        let mut unknown = screen_detection(AgentState::Unknown);
+        unknown.visible_idle = false;
+        let baseline = screen_publish_input(AgentState::Unknown, unknown, now);
+        assert_eq!(
+            decide_screen_detection_publish(baseline, &mut pending_idle),
+            DetectionPublishDecision::NoPublish
+        );
+
+        let mut forced = baseline;
+        forced.force_publish = true;
+        assert_eq!(
+            decide_screen_detection_publish(forced, &mut pending_idle),
+            DetectionPublishDecision::Publish {
+                state: AgentState::Unknown,
+                visible_idle: false,
+                visible_blocker: false,
+                visible_working: false,
+                process_exited: false,
+            }
+        );
+    }
+
+    #[test]
+    fn forced_publish_bypasses_working_to_idle_hold() {
+        let now = std::time::Instant::now();
+        let mut pending_idle = PendingIdleConfirmation::default();
+        let mut plain_idle = screen_detection(AgentState::Idle);
+        plain_idle.visible_idle = false;
+        let mut input = screen_publish_input(AgentState::Working, plain_idle, now);
+
+        // Without the force flag this transition is held for confirmation.
+        assert_eq!(
+            decide_screen_detection_publish(input, &mut pending_idle),
+            DetectionPublishDecision::NoPublish
+        );
+        assert!(pending_idle.active());
+
+        input.force_publish = true;
+        assert_eq!(
+            decide_screen_detection_publish(input, &mut pending_idle),
+            DetectionPublishDecision::Publish {
+                state: AgentState::Idle,
+                visible_idle: false,
+                visible_blocker: false,
+                visible_working: false,
+                process_exited: false,
+            }
+        );
+        assert!(!pending_idle.active());
     }
 
     #[test]
